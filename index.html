@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="shortcut icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>FITRI & RADEN</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script>
+      const { useState, useEffect, StrictMode } = React;
+
+      const DEFAULT_WALLETS = {
+        cash: 0,
+        btc: 0,
+        tabungan: 0,
+        hutang: 0,
+      };
+
+      const walletOptions = [
+        { id: "cash", name: "D O M P E T C A S H", icon: "wallet" },
+        { id: "btc", name: "BTC", icon: "bitcoin" },
+        { id: "tabungan", name: "TOTAL TABUNGAN", icon: "savings" },
+        { id: "hutang", name: "HUTANG", icon: "debt" },
+      ];
+
+      function FinancialDiary() {
+        // Initialize state
+        const [transactions, setTransactions] = useState(() => {
+          try {
+            const saved = localStorage.getItem("transactions");
+            return saved ? JSON.parse(saved) : [];
+          } catch (error) {
+            console.error("Error loading transactions:", error);
+            return [];
+          }
+        });
+
+        const [wallets, setWallets] = useState(() => {
+          try {
+            const saved = localStorage.getItem("wallets");
+            return saved ? JSON.parse(saved) : DEFAULT_WALLETS;
+          } catch (error) {
+            console.error("Error loading wallets:", error);
+            return DEFAULT_WALLETS;
+          }
+        });
+
+        // Form states
+        const [amount, setAmount] = useState("");
+        const [description, setDescription] = useState("");
+        const [transactionType, setTransactionType] = useState("income");
+        const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+        const [editingId, setEditingId] = useState(null);
+
+        // Wallet form states
+        const [walletInput, setWalletInput] = useState("");
+        const [selectedWallet, setSelectedWallet] = useState("cash");
+        const [walletOperation, setWalletOperation] = useState("add");
+        const [showWalletForm, setShowWalletForm] = useState(false);
+        const [showResetModal, setShowResetModal] = useState(false);
+
+        // Filter states
+        const [searchTerm, setSearchTerm] = useState("");
+        const [monthFilter, setMonthFilter] = useState("");
+
+        // Initialize month and period
+        const [currentMonth, setCurrentMonth] = useState("");
+        const [period, setPeriod] = useState("");
+
+        useEffect(() => {
+          const months = [
+            "Januari",
+            "Februari",
+            "Maret",
+            "April",
+            "Mei",
+            "Juni",
+            "Juli",
+            "Agustus",
+            "September",
+            "Oktober",
+            "November",
+            "Desember",
+          ];
+          const now = new Date();
+          setCurrentMonth(`${months[now.getMonth()]} ${now.getFullYear()}`);
+          setPeriod(`Januari - ${months[now.getMonth()]} ${now.getFullYear()}`);
+          setMonthFilter(now.toISOString().slice(0, 7));
+        }, []);
+
+        // Save to localStorage
+        useEffect(() => {
+          try {
+            localStorage.setItem("transactions", JSON.stringify(transactions));
+          } catch (error) {
+            console.error("Error saving transactions:", error);
+          }
+        }, [transactions]);
+
+        useEffect(() => {
+          try {
+            localStorage.setItem("wallets", JSON.stringify(wallets));
+          } catch (error) {
+            console.error("Error saving wallets:", error);
+          }
+        }, [wallets]);
+
+        // Helper function to safely parse numbers
+        const safeParseNumber = (value) => {
+          if (value === null || value === undefined || value === "") return 0;
+          const num = Number(value);
+          return Number.isFinite(num) ? num : 0;
+        };
+
+        // Calculate totals
+        const filteredRegularTransactions = transactions
+          .filter((t) => !t.isWalletTransaction)
+          .filter((transaction) => {
+            const matchesSearch = transaction.description
+              .toLowerCase()
+              .includes(searchTerm.toLowerCase());
+            const matchesMonth = monthFilter
+              ? transaction.date.startsWith(monthFilter)
+              : true;
+            return matchesSearch && matchesMonth;
+          });
+
+        const totalIncome = filteredRegularTransactions
+          .filter((t) => t.type === "income")
+          .reduce((sum, t) => sum + safeParseNumber(t.amount), 0);
+
+        const totalExpenses = filteredRegularTransactions
+          .filter((t) => t.type === "expense")
+          .reduce((sum, t) => sum + safeParseNumber(t.amount), 0);
+
+        const availableCash = totalIncome - totalExpenses;
+
+        // Calculate total assets
+        const totalAset = Object.entries(wallets).reduce((sum, [key, value]) => {
+          const numValue = safeParseNumber(value);
+          return key === "hutang" ? sum - numValue : sum + numValue;
+        }, 0);
+
+        // Format currency
+        const formatCurrency = (value) => {
+          const num = safeParseNumber(value);
+          return new Intl.NumberFormat("id-ID", {
+            style: "currency",
+            currency: "IDR",
+            minimumFractionDigits: 0,
+          }).format(num);
+        };
+
+        // Transaction handlers
+        const handleSubmitTransaction = (e) => {
+          e.preventDefault();
+          if (!amount || !description) return;
+
+          const numAmount = safeParseNumber(amount);
+          if (numAmount <= 0) return;
+
+          const newTransaction = {
+            id: Date.now(),
+            amount: numAmount,
+            description,
+            type: transactionType,
+            date,
+            isWalletTransaction: false,
+          };
+
+          setTransactions((prev) =>
+            editingId
+              ? prev.map((t) =>
+                  t.id === editingId ? { ...t, ...newTransaction } : t
+                )
+              : [...prev, newTransaction]
+          );
+
+          resetTransactionForm();
+        };
+
+        const resetTransactionForm = () => {
+          setAmount("");
+          setDescription("");
+          setTransactionType("income");
+          setDate(new Date().toISOString().slice(0, 10));
+          setEditingId(null);
+        };
+
+        // Wallet handlers
+        const updateWallet = (e) => {
+          e.preventDefault();
+          const numAmount = safeParseNumber(walletInput);
+          if (numAmount <= 0) return;
+
+          setWallets((prev) => ({
+            ...prev,
+            [selectedWallet]:
+              walletOperation === "add"
+                ? safeParseNumber(prev[selectedWallet]) + numAmount
+                : safeParseNumber(prev[selectedWallet]) - numAmount,
+          }));
+
+          const walletTransaction = {
+            id: Date.now(),
+            amount: numAmount,
+            description: `${walletOperation === "add" ? "Tambah" : "Kurangi"} ${
+              walletOptions.find((w) => w.id === selectedWallet)?.name
+            }`,
+            type: walletOperation === "add" ? "income" : "expense",
+            date: new Date().toISOString().slice(0, 10),
+            isWalletTransaction: true,
+            walletType: selectedWallet,
+          };
+
+          setTransactions((prev) => [...prev, walletTransaction]);
+          setWalletInput("");
+          setShowWalletForm(false);
+        };
+
+        // Delete transaction
+        const deleteTransaction = (id) => {
+          const transaction = transactions.find((t) => t.id === id);
+          if (!transaction) return;
+
+          if (transaction.isWalletTransaction) {
+            setWallets((prev) => ({
+              ...prev,
+              [transaction.walletType]:
+                transaction.type === "income"
+                  ? safeParseNumber(prev[transaction.walletType]) -
+                    safeParseNumber(transaction.amount)
+                  : safeParseNumber(prev[transaction.walletType]) +
+                    safeParseNumber(transaction.amount),
+            }));
+          }
+
+          setTransactions((prev) => prev.filter((t) => t.id !== id));
+        };
+
+        // Edit transaction
+        const editTransaction = (id) => {
+          const transaction = transactions.find((t) => t.id === id);
+          if (!transaction) return;
+
+          if (transaction.isWalletTransaction) {
+            alert("Transaksi dompet hanya bisa diubah melalui menu dompet");
+            return;
+          }
+
+          setAmount(transaction.amount.toString());
+          setDescription(transaction.description);
+          setTransactionType(transaction.type);
+          setDate(transaction.date);
+          setEditingId(id);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        };
+
+        // Reset all data
+        const resetAllData = () => {
+          setTransactions([]);
+          setWallets(DEFAULT_WALLETS);
+          setShowResetModal(false);
+          localStorage.removeItem("transactions");
+          localStorage.removeItem("wallets");
+        };
+
+        // Filter transactions for display
+        const filteredTransactions = transactions.filter((transaction) => {
+          const matchesSearch = transaction.description
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase());
+          const matchesMonth = monthFilter
+            ? transaction.date.startsWith(monthFilter)
+            : true;
+          return matchesSearch && matchesMonth;
+        });
+
+        return (
+          <div className="app-container">
+            <div className="diary-container">
+              <div className="diods">
+                <div className="diod diod__active"></div>
+                <div className="diod"></div>
+                <div className="diod"></div>
+              </div>
+
+              <h1 className="diary-title">TABUNGAN RADEN DAN FITRI</h1>
+
+              <div className="summary-section">
+                <div className="summary-box aset-box">
+                  <div className="summary-content">
+                    <div className="summary-icon">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="#9b59b6"
+                      >
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67 0-.84.79-1.43 2.1-1.43 1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.34-.87-2.57-2.49-2.97V5H10.9v1.69c-1.51.32-2.72 1.3-2.72 2.81 0 1.79 1.49 2.69 3.66 3.21 1.95.46 2.34 1.15 2.34 1.87 0 .53-.39 1.39-2.1 1.39-1.6 0-2.23-.72-2.32-1.64H8.47c.1 1.7 1.36 2.66 2.86 2.97V19h2.34v-1.67c1.52-.29 2.72-1.16 2.73-2.77-.01-2.2-1.9-2.96-3.66-3.42z" />
+                      </svg>
+                    </div>
+                    <div className="summary-text">
+                      <h3>{formatCurrency(totalAset)}</h3>
+                      <p>TOTAL ASET</p>
+                      <p className="period">{currentMonth}</p>
+                      <p className="asset-details">
+                        (Dompet: {formatCurrency(wallets.cash)} + BTC:{" "}
+                        {formatCurrency(wallets.btc)} + Tabungan:{" "}
+                        {formatCurrency(wallets.tabungan)} - Hutang:{" "}
+                        {formatCurrency(wallets.hutang)})
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="summary-box total-box">
+                  <div className="summary-content">
+                    <div className="summary-icon">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="#3498db"
+                      >
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67 0-.84.79-1.43 2.1-1.43 1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.34-.87-2.57-2.49-2.97V5H10.9v1.69c-1.51.32-2.72 1.3-2.72 2.81 0 1.79 1.49 2.69 3.66 3.21 1.95.46 2.34 1.15 2.34 1.87 0 .53-.39 1.39-2.1 1.39-1.6 0-2.23-.72-2.32-1.64H8.47c.1 1.7 1.36 2.66 2.86 2.97V19h2.34v-1.67c1.52-.29 2.72-1.16 2.73-2.77-.01-2.2-1.9-2.96-3.66-3.42z" />
+                      </svg>
+                    </div>
+                    <div className="summary-text">
+                      <h3>{formatCurrency(availableCash)}</h3>
+                      <p>TOTAL KESELURUHAN</p>
+                      <p className="period">{currentMonth}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="summary-box income-box">
+                  <div className="summary-content">
+                    <div className="summary-icon">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="#2ecc71"
+                      >
+                        <path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" />
+                      </svg>
+                    </div>
+                    <div className="summary-text">
+                      <h3>{formatCurrency(totalIncome)}</h3>
+                      <p>PEMASUKAN</p>
+                      <p className="period">{period}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="summary-box expense-box">
+                  <div className="summary-content">
+                    <div className="summary-icon">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="#e74c3c"
+                      >
+                        <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+                      </svg>
+                    </div>
+                    <div className="summary-text">
+                      <h3>{formatCurrency(totalExpenses)}</h3>
+                      <p>PENGELUARAN</p>
+                      <p className="period">{period}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {walletOptions.map((wallet) => (
+                  <div key={wallet.id} className={`summary-box ${wallet.id}-box`}>
+                    <div className="summary-content">
+                      <div className="summary-icon">
+                        {wallet.icon === "wallet" && (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="#f39c12"
+                          >
+                            <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+                          </svg>
+                        )}
+                        {wallet.icon === "bitcoin" && (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="#f7931a"
+                          >
+                            <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1.446-6.032a.75.75 0 0 0 1.5 0v-1.55h1.05a.75.75 0 0 0 0-1.5h-1.05v-1h1.05a.75.75 0 0 0 0-1.5h-1.723a3.227 3.227 0 1 1 0 6.454h1.723a.75.75 0 0 0 0-1.5h-1.05v-1.55zm.223-3.454h1.05a1.727 1.727 0 1 0 0-3.454h-1.05v3.454z" />
+                          </svg>
+                        )}
+                        {wallet.icon === "savings" && (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="#27ae60"
+                          >
+                            <path d="M19 5h-1V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v1H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zM8 4h8v1H8V4zm11 15H5v-2h14v2zm0-5H5V7h14v7z" />
+                          </svg>
+                        )}
+                        {wallet.icon === "debt" && (
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="#d35400"
+                          >
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67 0-.84.79-1.43 2.1-1.43 1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.34-.87-2.57-2.49-2.97V5H10.9v1.69c-1.51.32-2.72 1.3-2.72 2.81 0 1.79 1.49 2.69 3.66 3.21 1.95.46 2.34 1.15 2.34 1.87 0 .53-.39 1.39-2.1 1.39-1.6 0-2.23-.72-2.32-1.64H8.47c.1 1.7 1.36 2.66 2.86 2.97V19h2.34v-1.67c1.52-.29 2.72-1.16 2.73-2.77-.01-2.2-1.9-2.96-3.66-3.42z" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="summary-text">
+                        <div className="wallet-header">
+                          <h3>{formatCurrency(wallets[wallet.id])}</h3>
+                          <button
+                            className="edit-wallet-btn"
+                            onClick={() => {
+                              setSelectedWallet(wallet.id);
+                              setShowWalletForm(!showWalletForm);
+                            }}
+                          >
+                            {showWalletForm && selectedWallet === wallet.id
+                              ? "✕"
+                              : "✎"}
+                          </button>
+                        </div>
+                        <p>{wallet.name}</p>
+                        <p className="period">{period}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="divider"></div>
+
+              <div className="btns">
+                <form onSubmit={handleSubmitTransaction} className="input-section">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Tanggal</label>
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        className="date-picker"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Deskripsi Belanja</label>
+                      <input
+                        type="text"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder="Masukkan deskripsi"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Jumlah</label>
+                      <input
+                        type="number"
+                        value={amount}
+                        onChange={(e) => {
+                          const inputValue = e.target.value;
+                          if (
+                            inputValue === "" ||
+                            /^[0-9]*\.?[0-9]*$/.test(inputValue)
+                          ) {
+                            setAmount(inputValue);
+                          }
+                        }}
+                        placeholder="Rp"
+                        required
+                        min="0"
+                        step="1"
+                      />
+                    </div>
+                    <div className="type-toggle">
+                      <button
+                        type="button"
+                        className={`type-btn ${
+                          transactionType === "income" ? "active" : ""
+                        }`}
+                        onClick={() => setTransactionType("income")}
+                      >
+                        Pemasukan
+                      </button>
+                      <button
+                        type="button"
+                        className={`type-btn ${
+                          transactionType === "expense" ? "active" : ""
+                        }`}
+                        onClick={() => setTransactionType("expense")}
+                      >
+                        Pengeluaran
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className={`btn ${editingId ? "btn__primary" : ""}`}
+                  >
+                    {editingId ? "Update Transaksi" : "Tambah Transaksi"}
+                  </button>
+                  {editingId && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={resetTransactionForm}
+                    >
+                      Batal
+                    </button>
+                  )}
+                </form>
+
+                {showWalletForm && (
+                  <form onSubmit={updateWallet} className="wallet-form">
+                    <div className="wallet-form-header">
+                      <h3>
+                        Atur{" "}
+                        {walletOptions.find((w) => w.id === selectedWallet)?.name}
+                      </h3>
+                    </div>
+                    <div className="wallet-form-body">
+                      <div className="form-group">
+                        <label>Pilih Dompet</label>
+                        <select
+                          value={selectedWallet}
+                          onChange={(e) => setSelectedWallet(e.target.value)}
+                          className="wallet-select"
+                        >
+                          {walletOptions.map((wallet) => (
+                            <option key={wallet.id} value={wallet.id}>
+                              {wallet.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="wallet-input-container">
+                        <span>Rp</span>
+                        <input
+                          type="number"
+                          value={walletInput}
+                          onChange={(e) => {
+                            const inputValue = e.target.value;
+                            if (
+                              inputValue === "" ||
+                              /^[0-9]*\.?[0-9]*$/.test(inputValue)
+                            ) {
+                              setWalletInput(inputValue);
+                            }
+                          }}
+                          placeholder="Masukkan jumlah"
+                          className="wallet-input"
+                          required
+                          min="0"
+                          step="1"
+                        />
+                      </div>
+                      <div className="wallet-buttons">
+                        <button
+                          type="button"
+                          className={`wallet-add-btn ${
+                            walletOperation === "add" ? "active" : ""
+                          }`}
+                          onClick={() => setWalletOperation("add")}
+                        >
+                          Tambah
+                        </button>
+                        <button
+                          type="button"
+                          className={`wallet-subtract-btn ${
+                            walletOperation === "subtract" ? "active" : ""
+                          }`}
+                          onClick={() => setWalletOperation("subtract")}
+                        >
+                          Kurangi
+                        </button>
+                      </div>
+                      <button type="submit" className="btn">
+                        Update Dompet
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="reset-section">
+                  <button className="btn" onClick={() => setShowResetModal(true)}>
+                    Reset Semua Data
+                  </button>
+                </div>
+              </div>
+
+              <div className="transaction-list-container">
+                <div className="transaction-list-header">
+                  <h2 className="transaction-list-title">Daftar Transaksi</h2>
+                  <div className="transaction-filters">
+                    <input
+                      type="text"
+                      placeholder="Cari transaksi..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="search-input"
+                    />
+                    <input
+                      type="month"
+                      value={monthFilter}
+                      onChange={(e) => setMonthFilter(e.target.value)}
+                      className="month-filter"
+                    />
+                  </div>
+                </div>
+
+                {filteredTransactions.length === 0 ? (
+                  <p className="empty-state">Belum ada transaksi</p>
+                ) : (
+                  <div className="transaction-table-container">
+                    <table className="transaction-table">
+                      <thead>
+                        <tr>
+                          <th>Tanggal</th>
+                          <th>Deskripsi</th>
+                          <th>Jenis</th>
+                          <th>Jumlah</th>
+                          <th>Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTransactions.map((transaction) => (
+                          <tr
+                            key={transaction.id}
+                            className={
+                              transaction.isWalletTransaction
+                                ? "wallet-transaction"
+                                : ""
+                            }
+                          >
+                            <td>
+                              {new Date(transaction.date).toLocaleDateString(
+                                "id-ID",
+                                {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                }
+                              )}
+                            </td>
+                            <td>
+                              {transaction.description}
+                              {transaction.isWalletTransaction && (
+                                <span className="wallet-tag">
+                                  {
+                                    walletOptions.find(
+                                      (w) => w.id === transaction.walletType
+                                    )?.name
+                                  }
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <span className={`type-badge ${transaction.type}`}>
+                                {transaction.type === "income"
+                                  ? "Pemasukan"
+                                  : "Pengeluaran"}
+                                {transaction.isWalletTransaction && " (Wallet)"}
+                              </span>
+                            </td>
+                            <td className={`amount ${transaction.type}`}>
+                              Rp{" "}
+                              {safeParseNumber(transaction.amount).toLocaleString(
+                                "id-ID"
+                              )}
+                            </td>
+                            <td>
+                              <div className="action-buttons">
+                                <button
+                                  className="btn"
+                                  onClick={() => editTransaction(transaction.id)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="btn"
+                                  onClick={() => deleteTransaction(transaction.id)}
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {showResetModal && (
+                <div className="modal-overlay">
+                  <div className="modal-container">
+                    <div className="modal-header">
+                      <h3>Konfirmasi Reset Data</h3>
+                    </div>
+                    <div className="modal-body">
+                      <p>
+                        Apakah Anda yakin ingin menghapus semua data transaksi dan
+                        saldo dompet?
+                      </p>
+                      <p>Tindakan ini tidak dapat dibatalkan.</p>
+                    </div>
+                    <div className="modal-footer">
+                      <button
+                        className="btn"
+                        onClick={() => setShowResetModal(false)}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        className="btn btn__primary"
+                        onClick={resetAllData}
+                      >
+                        Ya, Reset Semua
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      const rootElement = document.getElementById("root");
+      const root = ReactDOM.createRoot(rootElement);
+      root.render(
+        <StrictMode>
+          <FinancialDiary />
+        </StrictMode>
+      );
+    </script>
+  </body>
+</html>
